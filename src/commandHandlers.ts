@@ -1,5 +1,5 @@
 import discord from 'discord.js'
-import LeetCode from 'leetcode-query'
+import LeetCode, { Problem } from 'leetcode-query'
 import { ServerModel } from './database'
 import { DateTime } from 'luxon'
 import { getLangName } from './languages'
@@ -408,6 +408,343 @@ handlers['language'] = (interaction: discord.CommandInteraction): Promise<Reply>
 			{
 				log.error(`Error clearing languages for server "${interaction.guildId}": "${err}"`)
 				resolve(`Internal error clearing accepted languages: "${err}"`)
+			})
+		}
+	})
+}
+
+handlers['problems'] = (interaction): Promise<Reply> =>
+{
+	return new Promise((resolve, reject) =>
+	{
+		log.debug('Running problems command')
+
+		const subCommand = interaction.options.data[0].name
+		log.debug(`Subcommand: "${subCommand}"`)
+
+		if (subCommand === 'add')
+		{
+			const problemSlug = interaction.options.get('problem')?.value as string
+			log.debug(`Adding problem: "${problemSlug}" to server "${interaction.guildId}"`)
+
+			lClient.problem(problemSlug).then((problem) =>
+			{
+				if (problem == null)
+				{
+					log.verbose(`Problem "${problemSlug}" not found`)
+					resolve(`Problem "${problemSlug}" not found. Please provide a valid LeetCode problem slug.`)
+				}
+				else
+				{
+					log.debug(`Problem "${problemSlug}" found: "${problem.title}"`)
+
+					ServerModel.findOneAndUpdate({ discordId: interaction.guildId },
+						{ $addToSet: { problemList: problemSlug } }, { upsert: true }).then((server) =>
+					{
+						const hadBefore = server?.problemList.includes(problemSlug) ?? false
+
+						if (!server || !hadBefore)
+						{
+							log.debug(`Problem "${problemSlug}" added to server "${interaction.guildId}"`)
+							resolve(`Added problem "${problem.title}".`)
+						}
+						else
+						{
+							log.debug(`Problem "${problemSlug}" already in server "${interaction.guildId}"`)
+							resolve(`Problem "${problem.title}" is already on the problem list.`)
+						}
+					})
+					.catch((err) =>
+					{
+						log.error(`Error adding problem "${problemSlug}" to server "${interaction.guildId}": "${err}"`)
+						resolve(`Internal error adding problem "${problem.title}": "${err}"`)
+					})
+				}
+			})
+			.catch((err) =>
+			{
+				log.error(`Error getting problem "${problemSlug}": "${err}"`)
+				resolve(`Internal error getting problem: "${err}"`)
+			})
+		}
+		else if (subCommand === 'remove')
+		{
+			const problemSlug = interaction.options.get('problem')?.value as string
+			log.debug(`Removing problem: "${problemSlug}" from server "${interaction.guildId}"`)
+
+			ServerModel.findOneAndUpdate({ discordId: interaction.guildId }, { $pull: { problemList: problemSlug } },
+				{ upsert: true }).then((server) =>
+			{
+				const hadBefore = server?.problemList.includes(problemSlug) ?? false
+
+				if (!server || !hadBefore)
+				{
+					log.debug(`Problem "${problemSlug}" not in server "${interaction.guildId}"`)
+					resolve(`Problem "${problemSlug}" not found.`)
+				}
+				else
+				{
+					log.debug(`Problem "${problemSlug}" removed from server "${interaction.guildId}"`)
+					resolve(`Removed problem "${problemSlug}".`)
+				}
+			})
+			.catch((err) =>
+			{
+				log.error(`Error adding problem "${problemSlug}" to server "${interaction.guildId}": "${err}"`)
+				resolve(`Internal error adding problem "${problemSlug}": "${err}"`)
+			})
+		}
+		else if (subCommand === 'list')
+		{
+			log.debug(`Listing problems for server "${interaction.guildId}"`)
+
+			ServerModel.findOne({ discordId: interaction.guildId }).then((server) =>
+			{
+				let response = '**Unsolved Problems:** '
+
+				if (!server || server?.problemList.length == 0)
+				{
+					log.silly('No unsolved problems found on this server')
+					response += 'None'
+				}
+				else
+				{
+					log.silly(`Found ${server?.problemList.length} unsolved problems on this server`)
+					response += server?.problemList.join(', ')
+				}
+
+				response += '\n**Today\'s Problems:** '
+
+				if (!server || server?.todayProblems.length == 0)
+				{
+					log.silly('No daily problems found on this server')
+					response += 'None'
+				}
+				else
+				{
+					log.silly(`Found ${server?.todayProblems.length} daily problems on this server`)
+					response += server?.todayProblems.join(', ')
+				}
+
+				response += '\n**Solved Problems:** '
+
+				if (!server || server?.completedProblems.length == 0)
+				{
+					log.silly('No solved problems found on this server')
+					response += 'None'
+				}
+				else
+				{
+					log.silly(`Found ${server?.completedProblems.length} solved problems on this server`)
+					response += server?.completedProblems.join(', ')
+				}
+
+				resolve(response)
+			})
+			.catch((err) =>
+			{
+				log.error(`Error getting server "${interaction.guildId}": "${err}"`)
+				resolve(`Internal error getting server: "${err}"`)
+			})
+		}
+		else if (subCommand === 'clear')
+		{
+			ServerModel.findOneAndUpdate({ discordId: interaction.guildId, }, { $set: { problemList: [] } },
+				{ upsert: true }).then(() =>
+			{
+				log.verbose(`Cleared unsolved problems for server "${interaction.guildId}"`)
+				resolve('Cleared problem list.')
+			})
+			.catch((err) =>
+			{
+				log.error(`Error clearing solved problems for server "${interaction.guildId}": "${err}"`)
+				resolve(`Internal error clearing solved problems: "${err}"`)
+			})
+		}
+		else if (subCommand === 'add-bulk')
+		{
+			// Read interaction attachment
+			const attachment = interaction.options.get('attachment')
+
+			if (!attachment?.attachment)
+			{
+				resolve('No attachment found.')
+				return
+			}
+
+			// Limit size to 0.25 MB
+			if (attachment.attachment.size > 256 * 1024)
+			{
+				resolve('Attachment size too large. Please upload a text file under 0.25 MB (256 KB).')
+				return
+			}
+
+			// Read attachment
+			fetch(attachment.attachment.url).then((res) => res.text()).then((text) =>
+			{
+				log.debug(`Attachment content read, ${text.length} characters`)
+
+				let problems: string[] = text.split('\r').join('').split('\n').filter((problem) => problem.length > 0)
+				let validProblems: string[] = []
+				let promises: Promise<Problem>[] = []
+
+				// Validate problems
+				for (const slug of problems)
+				{
+					promises.push(lClient.problem(slug))
+				}
+
+				log.debug(`Waiting for ${promises.length} problems to be fetched...`)
+
+				// Wait for all problems to be fetched (could be slow by rate limiting)
+				Promise.all(promises).then((problems) =>
+				{
+					log.debug(`Fetched ${problems.length} problems`)
+
+					for (const problem of problems)
+					{
+						if (problem)
+						{
+							log.silly(`Problem "${problem.titleSlug}" is valid`)
+							validProblems.push(problem.titleSlug)
+						}
+						else
+						{
+							log.silly('Found invalid problem')
+						}
+					}
+
+					ServerModel.findOneAndUpdate({ discordId: interaction.guildId }, { $addToSet: { problemList:
+						{ $each: validProblems } } }, { upsert: true }).then((server) =>
+					{
+						const validCount = validProblems.length
+						const invalidCount = problems.length - validCount
+						const hadBeforeCount = server?.problemList.filter((problem) =>
+							validProblems.includes(problem)).length || 0
+
+						log.verbose(`${validCount - hadBeforeCount} problems added to server "${interaction.guildId}"` +
+							`, ignored ${invalidCount} invalid problems, ${hadBeforeCount} problems already existed`)
+						resolve(`Added ${validCount - hadBeforeCount} problems. ${invalidCount} invalid problems ` +
+						` not added, and ${hadBeforeCount} were already on the list.`)
+					})
+					.catch((err) =>
+					{
+						log.error(`Error adding problems to server "${interaction.guildId}": "${err}"`)
+						resolve(`Internal error adding problems: "${err}"`)
+					})
+
+				})
+				.catch((err) =>
+				{
+					log.error(`Error getting problems: "${err}"`)
+					resolve(`Internal error getting problems: "${err}"`)
+				})
+			})
+			.catch((err) =>
+			{
+				log.error(`Error getting problems: "${err}"`)
+				resolve(`Internal error getting problems: "${err}"`)
+			})
+		}
+		else if (subCommand === 'remove-bulk')
+		{
+			// Read interaction attachment
+			const attachment = interaction.options.get('attachment')
+
+			if (!attachment?.attachment)
+			{
+				resolve('No attachment found.')
+				return
+			}
+
+			// Limit size to 0.25 MB
+			if (attachment.attachment.size > 256 * 1024)
+			{
+				resolve('Attachment size too large. Please upload a text file under 0.25 MB (256 KB).')
+				return
+			}
+
+			// Read attachment
+			fetch(attachment.attachment.url).then((res) => res.text()).then((text) =>
+			{
+				log.debug(`Attachment content read, ${text.length} characters`)
+
+				let problems: string[] = text.split('\r').join('').split('\n').filter((problem) => problem.length > 0)
+
+				ServerModel.findOneAndUpdate({ discordId: interaction.guildId }, { $pull: { problemList:
+					{ $in: problems } } }, { upsert: true }).then((server) =>
+				{
+					const hadBeforeCount = server?.problemList.filter((problem) =>
+						problem.includes(problem)).length || 0
+
+					log.verbose(`${hadBeforeCount} problems removed from server "${interaction.guildId}", ` +
+						`${problems.length - hadBeforeCount} problems were not on the problem list`)
+
+					resolve(`Removed ${hadBeforeCount} problems. ${problems.length - hadBeforeCount} ` +
+						`problems were not on the problem list.`)
+				})
+				.catch((err) =>
+				{
+					log.error(`Error removing problems from server "${interaction.guildId}": "${err}"`)
+					resolve(`Internal error removing problems: "${err}"`)
+				})
+			})
+			.catch((err) =>
+			{
+				log.error(`Error getting problem list attachment: "${err}"`)
+				resolve(`Internal error getting problems: "${err}"`)
+			})
+		}
+		else if (subCommand === 'set-per-day')
+		{
+			const perDay = interaction.options.get('per-day')
+
+			if (!perDay || !perDay.value || perDay.value < 0)
+			{
+				log.verbose(`Invalid per-day value "${perDay?.value}" for server "${interaction.guildId}"`)
+				resolve('Invalid per-day value. Please enter a number greater than 0.')
+				return
+			}
+
+			const perDayValue = perDay.value as number
+			log.debug(`Parsed per-day value: ${perDayValue} from "${perDay.value}"`)
+
+			ServerModel.findOneAndUpdate({ discordId: interaction.guildId }, { problemsPerDay: perDayValue },
+				{ upsert: true }).then(() =>
+			{
+				log.verbose(`Set problems per day to ${perDayValue} for server "${interaction.guildId}"`)
+				resolve(`Set problems per day to ${perDayValue}.`)
+			})
+			.catch((err) =>
+			{
+				log.error(`Error setting problems per day for server "${interaction.guildId}": "${err}"`)
+				resolve(`Internal error setting problems per day: "${err}"`)
+			})
+		}
+		else if (subCommand === 'set-random')
+		{
+			const random = interaction.options.get('random')
+
+			if (!random)
+			{
+				log.verbose(`Invalid random value "${random}" for server "${interaction.guildId}"`)
+				resolve('Invalid random value.')
+				return
+			}
+
+			const randomValue = random.value as boolean
+			log.debug(`Parsed random value: ${randomValue} from "${random.value}"`)
+
+			ServerModel.findOneAndUpdate({ discordId: interaction.guildId }, { randomProblems: randomValue },
+				{ upsert: true }).then(() =>
+			{
+				log.verbose(`Set random problems to ${randomValue} for server "${interaction.guildId}"`)
+				resolve(`Set random problems to ${randomValue}.`)
+			})
+			.catch((err) =>
+			{
+				log.error(`Error setting random problems for server "${interaction.guildId}": "${err}"`)
+				resolve(`Internal error setting random problems: "${err}"`)
 			})
 		}
 	})
