@@ -2,6 +2,7 @@ import discord from 'discord.js'
 import LeetCode from 'leetcode-query'
 import { ServerModel } from './database'
 import { DateTime } from 'luxon'
+import { getLangName } from './languages'
 import log from './log'
 
 const lClient = new LeetCode()
@@ -286,6 +287,127 @@ handlers['streak'] = (interaction): Promise<Reply> =>
 			{
 				log.error(`Error setting updates channel for server "${interaction.guildId}": "${err}"`)
 				resolve(`Internal error setting updates channel: "${err}"`)
+			})
+		}
+	})
+}
+
+handlers['language'] = (interaction: discord.CommandInteraction): Promise<Reply> =>
+{
+	return new Promise((resolve, reject) =>
+	{
+		log.debug('Running language command')
+		const subCommand = interaction.options.data[0].name
+		log.debug(`Subcommand: "${subCommand}"`)
+
+		if (subCommand === 'add')
+		{
+			const langValue = interaction.options.get('language')?.value as string
+			const langName = getLangName(langValue)
+			log.debug(`Adding language: "${langValue}" to server "${interaction.guildId}"`)
+
+			// Upsert the language into the database
+			ServerModel.findOneAndUpdate({ discordId: interaction.guildId }, { $addToSet: { languages: langValue } },
+				{ upsert: true }).then((server) =>
+			{
+				const hadBefore = server?.languages.includes(langValue) ?? false
+
+				if (!server || !hadBefore)
+				{
+					log.debug(`Added language "${langValue}" to server "${interaction.guildId}"`)
+					resolve(`Added language "${langName}". Accepted languages are now: "${langName}"`)
+				}
+				else
+				{
+					log.debug(`Language "${langValue}" already exists in server "${interaction.guildId}"`)
+					resolve(`Language "${langName}" is already accepted. Accepted languages are: ` +
+						`${server.languages.map((lang) => getLangName(lang)).join(', ')}`)
+				}
+			})
+			.catch((err) =>
+			{
+				log.error(`Error adding language "${langValue}" to server "${interaction.guildId}": "${err}"`)
+				resolve(`Internal error adding accepted language "${langName}": "${err}"`)
+			})
+		}
+		else if (subCommand === 'remove')
+		{
+			const langValue = interaction.options.get('language')?.value as string
+			const langName = getLangName(langValue)
+			log.debug(`Removing language: "${langValue}" from server "${interaction.guildId}"`)
+
+			// Remove the language from the database
+			ServerModel.findOneAndUpdate({ discordId: interaction.guildId }, { $pull: { languages: langValue } },
+				{ upsert: true }).then((server) =>
+			{
+				const hadLang = server?.languages.includes(langValue) ?? false
+				let response: string
+
+				if (!server || !hadLang)
+				{
+					log.debug(`Language "${langValue}" not found in server "${interaction.guildId}"`)
+					response = `Language "${langName}" is not accepted. Accepted languages are: `
+				}
+				else
+				{
+					server.languages = server.languages.filter((lang) => lang !== langValue)
+					log.debug(`Language "${langValue}" removed from server "${interaction.guildId}"`)
+					response = `Removed language "${langName}". Accepted languages are now: `
+				}
+
+				if (server?.languages.length === 0)
+				{
+					resolve(response + 'None')
+				}
+				else
+				{
+					resolve(response + server?.languages.map((lang) => getLangName(lang)).join(', '))
+				}
+			})
+			.catch((err) =>
+			{
+				log.error(`Error removing language "${langValue}" from server "${interaction.guildId}": "${err}"`)
+				resolve(`Internal error removing accepted language "${langName}": "${err}"`)
+			})
+		}
+		else if (subCommand === 'list')
+		{
+			log.debug(`Listing languages for server "${interaction.guildId}"`)
+
+			// Get the languages from the database
+			ServerModel.findOne({ discordId: interaction.guildId }).then((server) =>
+			{
+				if (!server || server.languages.length === 0)
+				{
+					log.verbose(`Server "${interaction.guildId}" not found in database`)
+					resolve('No accepted languages found. Use `/language add` to add a language.')
+					return
+				}
+
+				log.verbose(`Server "${interaction.guildId}" has accepted languages: "${server.languages}"`)
+				resolve(`Accepted languages are: "${server.languages.map((lang) => getLangName(lang)).join(', ')}"`)
+			})
+			.catch((err) =>
+			{
+				log.error(`Error listing languages for server "${interaction.guildId}": "${err}"`)
+				resolve(`Internal error listing accepted languages: "${err}"`)
+			})
+		}
+		else if (subCommand === 'clear')
+		{
+			log.debug(`Clearing languages for server "${interaction.guildId}"`)
+			
+			// Clear the languages from the database
+			ServerModel.findOneAndUpdate({ discordId: interaction.guildId }, { languages: [] },
+				{ upsert: true }).then(() =>
+			{
+				log.verbose(`Cleared languages for server "${interaction.guildId}"`)
+				resolve(`Cleared accepted languages.`)
+			})
+			.catch((err) =>
+			{
+				log.error(`Error clearing languages for server "${interaction.guildId}": "${err}"`)
+				resolve(`Internal error clearing accepted languages: "${err}"`)
 			})
 		}
 	})
