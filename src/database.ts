@@ -30,7 +30,7 @@ const Server = new mongoose.Schema(
 
 const ServerModel = mongoose.model('Server', Server)
 
-log.debug(`Connecting to MongoDB with URI "${process.env.MONGODB_URI}"`)
+log.debug(`Connecting to MongoDB with URI "${process.env.MONGOOSE_URI}"`)
 
 mongoose.connect(process.env.MONGOOSE_URI || '').then(() =>
 {
