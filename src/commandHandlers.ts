@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events'
 import discord from 'discord.js'
 import LeetCode, { Problem } from 'leetcode-query'
 import { ServerModel } from './database'
@@ -9,7 +10,7 @@ const lClient = new LeetCode()
 
 type Reply = string | discord.InteractionReplyOptions | discord.MessagePayload
 let handlers: Record<string, (interaction: discord.CommandInteraction) => Promise<Reply>> = {}
-let timezones: Set<string> = new Set(['UTC'])
+let timezoneUpdates = new EventEmitter()
 
 handlers['ping'] = (interaction: discord.CommandInteraction): Promise<Reply> =>
 {
@@ -175,7 +176,7 @@ handlers['streak'] = (interaction): Promise<Reply> =>
 				{ upsert: true }).then(() =>
 			{
 				// Add the timezone to the cache
-				timezones.add(timezone)
+				timezoneUpdates.emit('update', { serverId: interaction.guildId, timezone: timezone })
 				log.verbose(`Timezone updated to "${timezone}"`)
 				resolve(`Set timezone to "${timezone}"`)
 			})
@@ -751,4 +752,4 @@ handlers['problems'] = (interaction): Promise<Reply> =>
 }
 
 export default handlers
-export { timezones }
+export { timezoneUpdates }
