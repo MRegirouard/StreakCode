@@ -1,7 +1,7 @@
 import log from './log'
 import dotenv from 'dotenv'
 import discord, { TextChannel, EmbedBuilder } from 'discord.js'
-import commandHandlers from './commandHandlers'
+import commandHandlers, { timezoneUpdates } from './commandHandlers'
 import { ServerModel } from './database'
 import LeetCode, { RecentSubmission } from 'leetcode-query'
 import { CronJob } from 'cron'
@@ -239,3 +239,223 @@ new CronJob('* * * * *', () =>
 		})
 	})
 }, null, true)
+
+let timezoneJobs = new Map<string, CronJob>()
+
+timezoneUpdates.on('update', (update: { serverId: string, timezone: string }) =>
+{
+	log.verbose(`Timezone for server "${update.serverId}" updated to "${update.timezone}"`)
+
+	if (timezoneJobs.has(update.serverId))
+	{
+		timezoneJobs.get(update.serverId)!.stop()
+		timezoneJobs.delete(update.serverId)
+	}
+
+	timezoneJobs.set(update.serverId, new CronJob(`0 0 0 * * *`, () =>
+	{
+		daily(update.serverId)
+	}, null, true, update.timezone))
+})
+
+log.verbose('Fetching servers to start daily jobs...')
+
+ServerModel.find().then((servers) => servers.forEach((server) =>
+{
+	log.debug(`Starting daily job for server "${server.discordId}"...`)
+	timezoneJobs.set(server.discordId, new CronJob(`0 0 0 * * *`, () =>
+	{
+		daily(server.discordId)
+	}, null, true, server.timezone))
+}))
+
+// Update problem lists, send messages, and update streaks and streak roles
+function daily(discordId: string)
+{
+	log.verbose(`Running daily job for server "${discordId}"...`)
+
+	// Fetch the server
+	ServerModel.findOne({ discordId: discordId }).then((server) =>
+	{
+		if (!server)
+		{
+			log.error(`Server "${discordId}" not found for daily job`)
+			return
+		}
+
+		log.verbose(`Updating problems for server "${discordId}"...`)
+
+		// Update the problem lists
+		let nextProblems: string[] = []
+
+		if (server.problemsPerDay >= server.problemList.length)
+		{
+			nextProblems = server.problemList
+			server.problemList = []
+		}
+		else if (server.randomize)
+		{
+			nextProblems.push(...server.problemList.sort(() => Math.random() - 0.5).slice(0, server.problemsPerDay))
+			server.problemList = server.problemList.filter((problem) => !nextProblems.includes(problem))
+		}
+		else
+		{
+			nextProblems.push(...server.problemList.slice(0, server.problemsPerDay))
+			server.problemList = server.problemList.slice(server.problemsPerDay)
+		}
+
+		log.verbose(`Updating streaks for server "${discordId}"...`)
+
+		// Fetch the guild and channel
+		const guildPromise = dClient.guilds.fetch(discordId)
+		guildPromise.catch((err) =>
+		{
+			log.error(`Failed to fetch guild "${discordId}" for daily job: "${err}"`)
+		})
+
+		let channelPromise: Promise<TextChannel | null> | null = null
+		
+		if (server.updatesChannel)
+		{
+			channelPromise = guildPromise.then((guild) =>
+			{
+				return guild.channels.fetch(server.updatesChannel as string) as Promise<TextChannel | null>
+			})
+		}
+
+		// Make sure each user has solved all the problems
+		server.users.forEach((user) =>
+		{
+			let keepStreak = true
+			server.todayProblems.forEach((problem) =>
+			{
+				if (!user.completedProblems.includes(problem))
+				{
+					keepStreak = false
+					user.streakCount = 0
+					return
+				}
+			})
+
+			if (keepStreak)
+			{
+				user.streakCount++
+			}
+		})
+
+		// Cycle the problem lists
+		server.completedProblems.push(...server.todayProblems)
+		server.todayProblems = nextProblems
+
+		// If there are roles to add, add them
+		if (server.users.length > 0 && ((server.streakRole && server.streakRole !== '') ||
+			(server.lostStreakRole && server.lostStreakRole !== '')))
+		{
+			guildPromise.then((guild) =>
+			{
+				if (!guild)
+				{
+					log.error(`Failed to fetch guild "${discordId}" for adding streak role`)
+					return
+				}
+
+				log.silly(`Guild fetched, updating roles for ${server.users.length} members...`)
+
+				guild.members.fetch({ user: server.users.map((u) => u.discordId) }).then((members) => 
+					members.forEach((member) => 
+				{
+					// Find the user in the database
+					const dbUser = server.users.find((u) => u.discordId === member.id)
+
+					if (!dbUser)
+					{
+						log.warn(`Extra member "${member.id}" retrieved from server "${discordId}"`)
+						return
+					}
+
+					let addRole: string, removeRole: string
+
+					if (dbUser.streakCount > server.streakThreshold)
+					{
+						log.silly(`Member "${member.id}" has streak count ${dbUser.streakCount}, adding streak role...`)
+						addRole = server.streakRole as string
+						removeRole = server.lostStreakRole as string
+					}
+					else
+					{
+						log.silly(`Member "${member.id}" has streak count ${dbUser.streakCount}` +
+						', adding lost streak role...')
+						addRole = server.lostStreakRole as string
+						removeRole = server.streakRole as string
+					}
+
+					log.silly(`Add role: "${addRole}", remove role: "${removeRole}"`)
+					
+					// Add the role if there is one
+					if (addRole && addRole !== '')
+					{
+						log.silly(`Adding role "${addRole}" to member "${member.id}"...`)
+						member.roles.add(addRole).then(() =>
+						{
+							log.verbose(`Added role "${addRole}" to member "${member.id}" in server "${discordId}"`)
+						})
+						.catch((err) =>
+						{
+							log.error(`Failed to add role "${addRole}" to member "${member.id}" in server ` +
+							`"${discordId}": "${err}"`)
+						})
+					}
+
+					// Remove the role if there is one
+					if (removeRole && removeRole !== '')
+					{
+						log.silly(`Removing role "${removeRole}" from member "${member.id}"...`)
+						member.roles.remove(removeRole).then(() =>
+						{
+							log.verbose(`Removed role "${removeRole}" from member "${member.id}" in server ` +
+							`"${discordId}"`)
+						})
+						.catch((err) =>
+						{
+							log.error(`Failed to remove role "${removeRole}" from member "${member.id}" in server ` +
+							`"${discordId}": "${err}"`)
+						})
+					}
+				}))
+				.catch((err) =>
+				{
+					log.error(`Failed to fetch members for adding streak role: "${err}"`)
+				})
+			})
+		}
+
+		// Send the daily problem message
+		if (channelPromise)
+		{
+			channelPromise.then((channel) =>
+			{
+				if (!channel)
+				{
+					log.warn(`Channel "${server.updatesChannel}" not found for daily job`)
+					return
+				}
+
+				channel.send(`Today's problems are: ${nextProblems.join(', ')}`)
+			})
+		}
+
+		// Save the server
+		server.save().then(() =>
+		{
+			log.info(`Server "${discordId}" updated`)
+		})
+		.catch((err) =>
+		{
+			log.error(`Failed to save server "${discordId}": "${err}"`)
+		})
+	})
+	.catch((err) =>
+	{
+		log.error(`Failed to find server "${discordId}": "${err}"`)
+	})
+}
