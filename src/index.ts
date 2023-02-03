@@ -98,8 +98,9 @@ interface MultiUser
 }
 
 log.debug('Creating solved problem check cron job...')
+log.debug(`Cron job schedule: "${process.env.PROBLEMS_CRON || '* * * * *'}"`)
 
-new CronJob('* * * * *', () =>
+new CronJob(process.env.PROBLEMS_CRON || '* * * * *', () =>
 {
 	log.debug('Checking if any new problems have been solved...')
 
