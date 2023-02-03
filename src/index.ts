@@ -441,7 +441,30 @@ function daily(discordId: string)
 					return
 				}
 
-				channel.send(`Today's problems are: ${nextProblems.join(', ')}`)
+				log.silly(`Sending today's problems embed to channel "${channel.id}"`)
+
+				const embed = new EmbedBuilder()
+					.setTitle('Today\'s Problems')
+					.setColor('#0000ff')
+					.setDescription('Today\s problems are:')
+
+				let i = 0
+				for (const nextProb of nextProblems)
+				{
+					i++;
+					embed.addFields({ name: `Problem ${i}`, value: `[${nextProb}]` +
+						`(https://leetcode.com/problems/${nextProb})`, inline: true })
+				}
+
+				channel.send({ embeds: [embed] }).then(() =>
+				{
+					log.debug(`Sent today's problems embed to channel "${channel.id}"`)
+				})
+				.catch((err) =>
+				{
+					log.error('Failed to send today\'s problems embed to channel ' +
+					`"${channel.id}": "${err}"`)
+				})
 			})
 		}
 
