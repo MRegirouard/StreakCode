@@ -3,7 +3,7 @@ import dotenv from 'dotenv'
 import discord, { TextChannel, EmbedBuilder } from 'discord.js'
 import commandHandlers, { timezoneUpdates } from './commandHandlers'
 import { ServerModel } from './database'
-import LeetCode, { RecentSubmission } from 'leetcode-query'
+import LeetCode, { RecentSubmission, Problem } from 'leetcode-query'
 import { CronJob } from 'cron'
 
 log.info('Starting StreakCode bot...')
@@ -448,22 +448,62 @@ function daily(discordId: string)
 					.setColor('#0000ff')
 					.setDescription('Today\s problems are:')
 
-				let i = 0
+				let problemPromises: Promise<Problem>[] = []
+
+				log.debug(`Fetching ${nextProblems.length} problems from LeetCode for info...`)
 				for (const nextProb of nextProblems)
 				{
-					i++;
-					embed.addFields({ name: `Problem ${i}`, value: `[${nextProb}]` +
-						`(https://leetcode.com/problems/${nextProb})`, inline: true })
+					problemPromises.push(lClient.problem(nextProb))
 				}
 
-				channel.send({ embeds: [embed] }).then(() =>
+				Promise.all(problemPromises).then((problems) =>
 				{
-					log.debug(`Sent today's problems embed to channel "${channel.id}"`)
+					log.verbose(`Fetched ${problems.length} problems from LeetCode for info`)
+
+					let i = 0
+					for (const problem of problems)
+					{
+						i++
+						if (problem == null)
+						{
+							log.warn(`Problem is null, rejecting and not sending extra problem info...`)
+							throw new Error('Problem has null title or difficulty or is null')
+						}
+
+						embed.addFields({ name: `Problem ${i}`, value: `[${problem.title}]` +
+							`(https://leetcode.com/problems/${problem.titleSlug})\nDifficulty: ` +
+							`${problem.difficulty.toString()}`, inline: true })
+					}
+
+					channel.send({ embeds: [embed] }).then(() =>
+					{
+						log.debug(`Sent today's problems embed to channel "${channel.id}"`)
+					})
+					.catch((err) =>
+					{
+						log.error(`Failed to send today's problems embed to channel "${channel.id}": "${err}"`)
+					})
 				})
 				.catch((err) =>
 				{
-					log.error('Failed to send today\'s problems embed to channel ' +
-					`"${channel.id}": "${err}"`)
+					log.error(`Failed to fetch problems for today's problems embed: "${err}"`)
+
+					let i = 0
+					for (const nextProb of nextProblems)
+					{
+						i++;
+						embed.addFields({ name: `Problem ${i}`, value: `[${nextProb}]` +
+							`(https://leetcode.com/problems/${nextProb})`, inline: true })
+					}
+
+					channel.send({ embeds: [embed] }).then(() =>
+					{
+						log.debug(`Sent today's problems embed to channel "${channel.id}"`)
+					})
+					.catch((err) =>
+					{
+						log.error(`Failed to send today\'s problems embed to channel "${channel.id}": "${err}"`)
+					})
 				})
 			})
 		}
