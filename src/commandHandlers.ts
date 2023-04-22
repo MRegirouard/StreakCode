@@ -752,5 +752,177 @@ handlers['problems'] = (interaction): Promise<Reply> =>
 	})
 }
 
+handlers['points'] = (interaction): Promise<Reply> =>
+{
+	return new Promise((resolve, reject) =>
+	{
+		log.debug('Running points command')
+
+		const subCommand = interaction.options.data[0].name
+		log.debug(`Subcommand: "${subCommand}"`)
+
+		if (subCommand === 'hard-problem')
+		{
+			const points = interaction.options.get('points')
+
+			if (!points || !points.value || (points.value as number) < 0)
+			{
+				log.verbose(`Invalid hard problem point value "${points?.value}" for server "${interaction.guildId}"`)
+				resolve('Invalid hard problem point value. Please enter a number greater than or equal to 0.')
+				return
+			}
+
+			const pointsValue = points.value as number
+			log.debug(`Parsed hard problem point value: ${pointsValue} from "${points.value}"`)
+
+			ServerModel.findOneAndUpdate({ discordId: interaction.guildId }, { hardPoints: pointsValue },
+				{ upsert: true }).then(() =>
+			{
+				log.verbose(`Set hard problem point value to ${pointsValue} for server "${interaction.guildId}"`)
+				resolve(`Set hard problem point value to ${pointsValue}.`)
+			})
+			.catch((err) =>
+			{
+				log.error(`Error setting hard problem point value for server "${interaction.guildId}": "${err}"`)
+				resolve(`Internal error setting hard problem point value: "${err}"`)
+			})
+		}
+		else if (subCommand === 'medium-problem')
+		{
+			const points = interaction.options.get('points')
+
+			if (!points || !points.value || (points.value as number) < 0)
+			{
+				log.verbose(`Invalid medium problem point value "${points?.value}" for server "${interaction.guildId}"`)
+				resolve('Invalid medium problem point value. Please enter a number greater than or equal to 0.')
+				return
+			}
+
+			const pointsValue = points.value as number
+			log.debug(`Parsed medium problem point value: ${pointsValue} from "${points.value}"`)
+
+			ServerModel.findOneAndUpdate({ discordId: interaction.guildId }, { mediumPoints: pointsValue },
+				{ upsert: true }).then(() =>
+			{
+				log.verbose(`Set medium problem point value to ${pointsValue} for server "${interaction.guildId}"`)
+				resolve(`Set medium problem point value to ${pointsValue}.`)
+			})
+			.catch((err) =>
+			{
+				log.error(`Error setting medium problem point value for server "${interaction.guildId}": "${err}"`)
+				resolve(`Internal error setting medium problem point value: "${err}"`)
+			})
+		}
+		else if (subCommand === 'easy-problem')
+		{
+			const points = interaction.options.get('points')
+
+			if (!points || !points.value || (points.value as number) < 0)
+			{
+				log.verbose(`Invalid easy problem point value "${points?.value}" for server "${interaction.guildId}"`)
+				resolve('Invalid easy problem point value. Please enter a number greater than or equal to 0.')
+				return
+			}
+
+			const pointsValue = points.value as number
+			log.debug(`Parsed easy problem point value: ${pointsValue} from "${points.value}"`)
+
+			ServerModel.findOneAndUpdate({ discordId: interaction.guildId }, { easyPoints: pointsValue },
+				{ upsert: true }).then(() =>
+			{
+				log.verbose(`Set easy problem point value to ${pointsValue} for server "${interaction.guildId}"`)
+				resolve(`Set easy problem point value to ${pointsValue}.`)
+			})
+			.catch((err) =>
+			{
+				log.error(`Error setting easy problem point value for server "${interaction.guildId}": "${err}"`)
+				resolve(`Internal error setting easy problem point value: "${err}"`)
+			})
+		}
+		else if (subCommand === 'streak')
+		{
+			if (!interaction.options.data[0].options || interaction.options.data[0].options.length === 0)
+			{
+				log.verbose(`Invalid streak subcommand for server "${interaction.guildId}"`)
+				resolve('Internal error: Invalid streak subcommand.')
+				return
+			}
+
+			const subSubCommand = interaction.options.data[0].options[0].name
+
+			if (subSubCommand === 'constant')
+			{
+				log.verbose(`Running streak constant subcommand for server "${interaction.guildId}"`)
+
+				const points = interaction.options.data[0].options[0].options?.find((option) => option.name === 'points')
+
+				if (!points || !points.value || (points.value as number) < 0)
+				{
+					log.verbose(`Invalid streak constant point value "${points?.value}" for server "${interaction.guildId}"`)
+					resolve('Invalid streak point value. Please enter a number greater than or equal to 0.')
+					return
+				}
+	
+				const pointsValue = points.value as number
+				log.debug(`Parsed streak constant point value: ${pointsValue} from "${points.value}"`)
+	
+				ServerModel.findOneAndUpdate({ discordId: interaction.guildId },
+					{ constStreakPoints: pointsValue, dynamicStreakPoints: false }, { upsert: true }).then(() =>
+				{
+					log.verbose(`Set streak constant point value to ${pointsValue} for server "${interaction.guildId}"`)
+					resolve(`Set streak point value to ${pointsValue}.`)
+				})
+				.catch((err) =>
+				{
+					log.error(`Error setting streak constant point value for server "${interaction.guildId}": "${err}"`)
+					resolve(`Internal error setting streak point value: "${err}"`)
+				})
+			}
+			else if (subSubCommand === 'dynamic')
+			{
+				log.verbose(`Running streak dynamic subcommand for server "${interaction.guildId}"`)
+
+				ServerModel.findOneAndUpdate({ discordId: interaction.guildId }, { dynamicStreakPoints: true },
+					{ upsert: true }).then(() =>
+				{
+					log.verbose(`Set streak point mode to "dynamic" for server "${interaction.guildId}"`)
+					resolve(`Set streak point mode to "dynamic".`)
+				})
+				.catch((err) =>
+				{
+					log.error(`Error setting streak point mode to "dynamic" for server "${interaction.guildId}": "${err}"`)
+					resolve(`Internal error setting streak point mode to "dynamic": "${err}"`)
+				})
+			}
+		}
+		else if (subCommand === 'daily-problem')
+		{
+			const points = interaction.options.get('points')
+
+			if (!points || !points.value || (points.value as number) < 0)
+			{
+				log.verbose(`Invalid daily problem point value "${points?.value}" for server "${interaction.guildId}"`)
+				resolve('Invalid daily problem point value. Please enter a number greater than or equal to 0.')
+				return
+			}
+
+			const pointsValue = points.value as number
+			log.debug(`Parsed daily problem point value: ${pointsValue} from "${points.value}"`)
+
+			ServerModel.findOneAndUpdate({ discordId: interaction.guildId }, { dailyProblemPoints: pointsValue },
+				{ upsert: true }).then(() =>
+			{
+				log.verbose(`Set daily problem point value to ${pointsValue} for server "${interaction.guildId}"`)
+				resolve(`Set daily problem point value to ${pointsValue}.`)
+			})
+			.catch((err) =>
+			{
+				log.error(`Error setting daily problem point value for server "${interaction.guildId}": "${err}"`)
+				resolve(`Internal error setting daily problem point value: "${err}"`)
+			})
+		}
+	})
+}
+
 export default handlers
 export { timezoneUpdates }
