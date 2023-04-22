@@ -137,5 +137,50 @@ const problemCommand = new SlashCommandBuilder()
 			.setDescription('Whether problems should be assigned randomly')
 			.setRequired(true)))
 
-const commands = [accountCmd, streakCmd, languageCmd, problemCommand]
+const pointsCommand = new SlashCommandBuilder()
+	.setName("points")
+	.setDescription("Configure point system")
+	.addSubcommand((setHardPts) =>
+		setHardPts.setName('hard-problem')
+		.setDescription('Set the number of points to give for solving hard problem')
+		.addIntegerOption((hardPtsOpt) =>
+			hardPtsOpt.setName('points')
+			.setDescription('Number of points to give for solving hard problem')
+			.setRequired(true)))
+	.addSubcommand((setMediumPts) =>
+		setMediumPts.setName('medium-problem')
+		.setDescription('Set the number of points to give for solving medium problem')
+		.addIntegerOption((mediumPtsOpt) =>
+			mediumPtsOpt.setName('points')
+			.setDescription('Number of points to give for solving medium problem')
+			.setRequired(true)))
+	.addSubcommand((setEasyPts) =>
+		setEasyPts.setName('easy-problem')
+		.setDescription('Set the number of points to give for solving easy problem')
+		.addIntegerOption((easyPtsOpt) =>
+			easyPtsOpt.setName('points')
+			.setDescription('Number of points to give for solving easy problem')
+			.setRequired(true)))
+	.addSubcommandGroup((setPtsGroup) =>
+		setPtsGroup.setName('streak')
+		.setDescription('Set the number and method of giving points for maintaining a streak')
+		.addSubcommand((constantPts) =>
+			constantPts.setName('constant')
+			.setDescription('Give a constant number of points for maintaining a streak')
+			.addIntegerOption((constantPtsOpt) =>
+				constantPtsOpt.setName('points')
+				.setDescription('Number of points to give for maintaining a streak')
+				.setRequired(true)))
+		.addSubcommand((growPts) =>
+			growPts.setName('dynamic')
+			.setDescription('Award an increasing number of points for maintaining a streak, using a logarithmic function')))
+	.addSubcommand((setDailyProbPts) =>
+		setDailyProbPts.setName('daily-problem')
+		.setDescription('Set the number of bonus points to award for solving the daily problem')
+		.addIntegerOption((dailyProbPtsOpt) =>
+			dailyProbPtsOpt.setName('points')
+			.setDescription('Number of bonus points to give for solving the daily problem')
+			.setRequired(true)))
+
+const commands = [accountCmd, streakCmd, languageCmd, problemCommand, pointsCommand]
 export default commands
