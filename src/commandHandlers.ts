@@ -76,6 +76,7 @@ handlers['account'] = (interaction): Promise<Reply> =>
 								leetCodeName: username,
 								completedProblems: [],
 								streakCount: 0,
+								points: 0,
 							})
 						}
 						else
